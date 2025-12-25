@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>RT-Viewer Ultimate Comparison (Final v3)</title>
+<style>
+    body { background: #111; color: #eee; font-family: sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;}
+    header { padding: 10px 20px; background: #222; border-bottom: 1px solid #444; display: flex; justify-content: space-between; align-items: center; }
+    h1 { margin: 0; font-size: 1.2em; }
+    .container { flex: 1; display: flex; position: relative; overflow: hidden; }
+    .view-panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid #444; position: relative; overflow: hidden;}
+    .controls { padding: 5px 10px; background: #222; display: flex; justify-content: space-between; align-items: center; font-size: 12px;}
+    select { background: #333; color: #fff; border: 1px solid #555; padding: 4px; font-size: 12px; width: 220px; text-overflow: ellipsis;}
+    .canvas-container { flex: 1; position: relative; overflow: hidden; background: #000; cursor: default; display: flex; align-items: center; justify-content: center;}
+    canvas { position: absolute; image-rendering: pixelated; }
+    .slice-ctrl { padding: 10px; background: #222; display: flex; gap: 10px; align-items: center; justify-content: center; }
+    input[type=range] { width: 300px; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; background: #444; min-width: 60px; text-align: right;}
+    .loading { position: absolute; top:50%; left:50%; transform: translate(-50%,-50%); color: #0ff; z-index: 10; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; pointer-events: none; display: none;}
+    .error-msg { position: absolute; top:50%; left:50%; transform: translate(-50%,-50%); color: #f55; z-index: 11; background: rgba(0,0,0,0.9); padding: 20px; border-radius: 5px; text-align: center; display: none;}
+    .overlay-info { position: absolute; bottom: 5px; left: 5px; font-size: 12px; color: #ff0; pointer-events: none; text-shadow: 1px 1px 0 #000; z-index: 5;}
+</style>
+</head>
+<body>
+
+<header>
+    <h1>RT-Viewer データ圧縮比較 (Final v3)</h1>
+    <small style="color:#aaa">左:WL/WW | 右:Zoom | 中:Pan | ホイール:Slice</small>
+</header>
+
+<div class="container">
+    <div class="view-panel">
+        <div class="controls"><select id="selL"></select><span id="sizeL" class="badge">-</span></div>
+        <div class="canvas-container" id="contL">
+            <canvas id="cvsL"></canvas><div id="msgL" class="loading">Loading...</div><div id="errL" class="error-msg"></div><div class="overlay-info" id="infoL"></div>
+        </div>
+    </div>
+    <div class="view-panel">
+        <div class="controls"><select id="selR"></select><span id="sizeR" class="badge">-</span></div>
+        <div class="canvas-container" id="contR">
+            <canvas id="cvsR"></canvas><div id="msgR" class="loading">Loading...</div><div id="errR" class="error-msg"></div><div class="overlay-info" id="infoR"></div>
+        </div>
+    </div>
+</div>
+
+<div class="slice-ctrl">
+    <span>Slice: <span id="sliceDisp">0</span></span>
+    <input type="range" id="sliceRange" min="0" max="100" value="0">
+</div>
+
+<script>
+// --- LUT定義 ---
+// 1. 旧ロジック
+const LUT_5BIT_OLD = generateLUT(32, [0, 2, 13, 31], [-1000, -150, 350, 1000]);
+
+// 2. ★新ロジック (Custom 5-bit 4-Step)
+// Range: -1000 -> -200 -> 0 -> 100 -> 1000
+// Points: 0 -> 2 -> 7 -> 17 -> 31
+const LUT_5BIT_CUSTOM = generateLUT(32, [0, 2, 7, 17, 31], [-1000, -200, 0, 100, 1000]);
+
+// 3. 8-bit用 (Silhouette等)
+const LUT_8BIT = generateLUT(256, [0, 10, 245, 255], [-1000, -150, 350, 1000]);
+
+let manifest = null;
+let volumes = {};
+let viewState = { slice: 0, scale: 1.0, panX: 0, panY: 0, ww: 400, wl: 40, isLeft: false, isRight: false, isMiddle: false, lastX: 0, lastY: 0 };
+const offCanvas = document.createElement('canvas');
+const offCtx = offCanvas.getContext('2d');
+
+async function init() {
+    try {
+        const res = await fetch('manifest.json?' + new Date().getTime());
+        if (!res.ok) throw new Error(`Manifest Load Failed`);
+        manifest = await res.json();
+        setupUI();
+        await loadVariant('L', 3); // Old Logic
+        await loadVariant('R', 7); // New Logic
+    } catch(e) { alert("初期化エラー: " + e.message); }
+}
+
+function setupUI() {
+    ['L', 'R'].forEach(side => {
+        const sel = document.getElementById(`sel${side}`);
+        manifest.variants.forEach((v, idx) => sel.add(new Option(v.name, idx)));
+        sel.onchange = (e) => loadVariant(side, e.target.value);
+        const cont = document.getElementById(`cont${side}`);
+        cont.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);     
+        cont.addEventListener('wheel', onWheel, {passive: false});
+        cont.addEventListener('contextmenu', e => e.preventDefault());
+    });
+    const range = document.getElementById('sliceRange');
+    const baseDims = manifest.base_dims || manifest.variants[0].dims;
+    range.max = baseDims[0] - 1;
+    range.value = Math.floor(baseDims[0] / 2);
+    viewState.slice = parseInt(range.value);
+    range.oninput = (e) => { viewState.slice = parseInt(e.target.value); updateView(); };
+    window.addEventListener('resize', requestRender);
+}
+
+// --- 操作系 (標準DICOMビューア仕様) ---
+function onMouseDown(e) {
+    if(e.target.tagName!=='CANVAS')return;
+    viewState.lastX=e.clientX; viewState.lastY=e.clientY;
+    if(e.button===0) viewState.isLeft=true;       // Left: WL/WW
+    else if(e.button===1) viewState.isMiddle=true; // Middle: Pan
+    else if(e.button===2) viewState.isRight=true;  // Right: Zoom
+    e.preventDefault();
+}
+function onMouseUp(e) { viewState.isLeft=false; viewState.isRight=false; viewState.isMiddle=false; }
+function onMouseMove(e) {
+    if(!viewState.isLeft && !viewState.isRight && !viewState.isMiddle) return;
+    const dx=e.clientX-viewState.lastX, dy=e.clientY-viewState.lastY;
+    
+    if(viewState.isLeft) {
+        // WL/WW
+        viewState.ww = Math.max(1, viewState.ww + dx * 2);
+        viewState.wl -= dy * 2;
+    } else if(viewState.isRight) {
+        // Zoom (Right Drag) - 上下でズームインアウト
+        const zoomSpeed = 0.01;
+        const factor = 1 + (-dy * zoomSpeed);
+        viewState.scale = Math.max(0.1, viewState.scale * factor);
+    } else if(viewState.isMiddle) {
+        // Pan (Middle Drag)
+        viewState.panX += dx / viewState.scale;
+        viewState.panY += dy / viewState.scale;
+    }
+    viewState.lastX=e.clientX; viewState.lastY=e.clientY;
+    requestRender();
+}
+function onWheel(e) {
+    e.preventDefault();
+    const maxSlice = document.getElementById('sliceRange').max;
+    // ホイールでスライス移動
+    if(e.deltaY > 0) {
+        viewState.slice = Math.min(maxSlice, viewState.slice + 1);
+    } else {
+        viewState.slice = Math.max(0, viewState.slice - 1);
+    }
+    updateView();
+}
+function updateView() {
+    document.getElementById('sliceDisp').innerText = viewState.slice;
+    document.getElementById('sliceRange').value = viewState.slice;
+    requestRender();
+}
+
+async function loadVariant(side, idx) {
+    const v = manifest.variants[idx];
+    const sel = document.getElementById(`sel${side}`);
+    const sizeBadge = document.getElementById(`size${side}`);
+    sel.value = idx;
+
+    if(v.size_gz) {
+        const mb = (v.size_gz/1048576).toFixed(3);
+        const baseSize = manifest.variants[0].size_gz; // 1番(Original)基準
+        const ratio = (v.size_gz / baseSize * 100).toFixed(1);
+        sizeBadge.innerText = `${mb}MB (${ratio}%)`;
+    }
+
+    if (!volumes[v.id]) {
+        try {
+            document.getElementById(`msg${side}`).style.display = 'block';
+            const res = await fetch(v.file, {cache: "no-store"});
+            if (!res.ok) throw new Error("File not found");
+            const ds = new DecompressionStream("gzip");
+            const reader = res.body.pipeThrough(ds).getReader();
+            let loaded=0, chunks=[];
+            while(true) { const {done, value}=await reader.read(); if(done)break; chunks.push(value); loaded+=value.length; }
+            const combined = new Uint8Array(loaded);
+            let offset=0; for(let c of chunks){ combined.set(c, offset); offset+=c.length; }
+            volumes[v.id] = { data: (v.type==='int16')?new Int16Array(combined.buffer):combined, meta: v };
+        } catch (e) { document.getElementById(`err${side}`).innerText="Error"; document.getElementById(`err${side}`).style.display='block'; return; }
+        document.getElementById(`msg${side}`).style.display = 'none';
+    }
+    requestRender();
+}
+
+function requestRender() { drawPanel('L'); drawPanel('R'); updateInfo(); }
+
+function drawPanel(side) {
+    const idx = document.getElementById(`sel${side}`).value;
+    if(!manifest || !manifest.variants[idx]) return;
+    const vMeta = manifest.variants[idx];
+    const vol = volumes[vMeta.id];
+    if (!vol) return;
+
+    const cvs = document.getElementById(`cvs${side}`);
+    const ctx = cvs.getContext('2d');
+    const cont = document.getElementById(`cont${side}`);
+    const [D, H, W] = vMeta.dims;
+    
+    offCanvas.width = W; offCanvas.height = H;
+    const imgData = offCtx.createImageData(W, H);
+    const buf = imgData.data;
+    const src = vol.data;
+    const safeSlice = Math.min(viewState.slice, D-1);
+    const offset = safeSlice * H * W;
+    const wMin = viewState.wl - viewState.ww / 2;
+    const wDiv = 255 / viewState.ww;
+
+    for (let i=0; i < H*W; i++) {
+        let hu = 0; const raw = src[offset + i];
+        
+        if (vMeta.type === 'int16') hu = raw;
+        else if (vMeta.type === 'uint8') hu = raw / 255.0 * 500.0 - 150.0;
+        else if (vMeta.type === 'linear_5bit') hu = (raw / 31.0) * 2000.0 - 1000.0;
+        else if (vMeta.type === 'linear_5bit_wide') hu = (raw / 31.0) * (3096.0 - (-1000.0)) + (-1000.0);
+        else if (vMeta.type === 'lut_5bit') hu = LUT_5BIT_OLD[raw];
+        else if (vMeta.type === 'lut_5bit_custom') hu = LUT_5BIT_CUSTOM[raw];
+        else if (vMeta.type === 'lut_8bit') hu = LUT_8BIT[raw];
+
+        let val = (hu - wMin) * wDiv;
+        buf[i*4] = buf[i*4+1] = buf[i*4+2] = Math.max(0, Math.min(255, val));
+        buf[i*4+3] = 255;
+    }
+    offCtx.putImageData(imgData, 0, 0);
+    
+    const contW = cont.clientWidth, contH = cont.clientHeight;
+    cvs.width = contW; cvs.height = contH;
+    const scale = Math.min(contW / W, contH / H);
+
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    ctx.save();
+    ctx.translate(contW/2, contH/2);
+    ctx.scale(scale * viewState.scale, scale * viewState.scale);
+    ctx.translate(viewState.panX, viewState.panY);
+    ctx.drawImage(offCanvas, -W/2, -H/2);
+    ctx.restore();
+}
+
+function updateInfo() {
+    const txt = `WL: ${viewState.wl.toFixed(0)} / WW: ${viewState.ww.toFixed(0)} | Zoom: x${viewState.scale.toFixed(2)} | Slice: ${viewState.slice}`;
+    document.getElementById('infoL').innerText = txt; document.getElementById('infoR').innerText = txt;
+}
+
+function generateLUT(steps, P, R) {
+    const lut = [];
+    for(let i=0; i<steps; i++) {
+        let v = R[0];
+        for (let k = 0; k < P.length - 1; k++) {
+            if (i >= P[k] && i <= P[k+1]) {
+                const ratio = (i - P[k]) / (P[k+1] - P[k]);
+                v = R[k] + ratio * (R[k+1] - R[k]);
+                break;
+            }
+        }
+        lut.push(v);
+    }
+    return lut;
+}
+init();
+</script>
+</body>
+</html>

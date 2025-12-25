@@ -1,0 +1,105 @@
+{
+  "variants": [
+    {
+      "id": 1,
+      "name": "1. Original (16bit/512px)",
+      "file": "v01_int16.bin.gz",
+      "size_gz": 4663172,
+      "type": "int16",
+      "dims": [
+        5,
+        1024,
+        1024
+      ]
+    },
+    {
+      "id": 2,
+      "name": "2. Reference (16bit/256px)",
+      "file": "v02_int16.bin.gz",
+      "size_gz": 1278846,
+      "type": "int16",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 3,
+      "name": "3. Linear 5-bit (Full 12bit Range)",
+      "file": "v03_linear_5bit_wide.bin.gz",
+      "size_gz": 81279,
+      "type": "linear_5bit_wide",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 4,
+      "name": "4. Non-Linear 5-bit (Old Logic)",
+      "file": "v04_lut_5bit.bin.gz",
+      "size_gz": 139874,
+      "type": "lut_5bit",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 5,
+      "name": "5. Body Masked",
+      "file": "v05_lut_5bit.bin.gz",
+      "size_gz": 128887,
+      "type": "lut_5bit",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 6,
+      "name": "6. Full Optimization (Old Logic)",
+      "file": "v06_lut_5bit.bin.gz",
+      "size_gz": 107405,
+      "type": "lut_5bit",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 7,
+      "name": "7. Silhouette",
+      "file": "v07_lut_8bit.bin.gz",
+      "size_gz": 6005,
+      "type": "lut_8bit",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 8,
+      "name": "8. Custom 5-bit (Your 4-Step Logic)",
+      "file": "v08_lut_5bit_custom.bin.gz",
+      "size_gz": 138563,
+      "type": "lut_5bit_custom",
+      "dims": [
+        5,
+        512,
+        512
+      ]
+    }
+  ],
+  "base_dims": [
+    5,
+    1024,
+    1024
+  ]
+}
