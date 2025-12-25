@@ -2,30 +2,53 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>RT-Viewer Ultimate Comparison (Final v3)</title>
+<title>RT-Viewer Ultimate Comparison (Final v4)</title>
 <style>
+    /* --- Base Styles --- */
     body { background: #111; color: #eee; font-family: sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;}
     header { padding: 10px 20px; background: #222; border-bottom: 1px solid #444; display: flex; justify-content: space-between; align-items: center; }
-    h1 { margin: 0; font-size: 1.2em; }
+    h1 { margin: 0; font-size: 1.2em; display: flex; align-items: center; gap: 10px;}
+    
+    /* --- Layout --- */
     .container { flex: 1; display: flex; position: relative; overflow: hidden; }
     .view-panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid #444; position: relative; overflow: hidden;}
     .controls { padding: 5px 10px; background: #222; display: flex; justify-content: space-between; align-items: center; font-size: 12px;}
-    select { background: #333; color: #fff; border: 1px solid #555; padding: 4px; font-size: 12px; width: 220px; text-overflow: ellipsis;}
+    select { background: #333; color: #fff; border: 1px solid #555; padding: 4px; font-size: 12px; width: 200px; text-overflow: ellipsis;}
     .canvas-container { flex: 1; position: relative; overflow: hidden; background: #000; cursor: default; display: flex; align-items: center; justify-content: center;}
     canvas { position: absolute; image-rendering: pixelated; }
+    
+    /* --- Footer Controls --- */
     .slice-ctrl { padding: 10px; background: #222; display: flex; gap: 10px; align-items: center; justify-content: center; }
     input[type=range] { width: 300px; }
+    
+    /* --- UI Components --- */
     .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; background: #444; min-width: 60px; text-align: right;}
     .loading { position: absolute; top:50%; left:50%; transform: translate(-50%,-50%); color: #0ff; z-index: 10; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; pointer-events: none; display: none;}
     .error-msg { position: absolute; top:50%; left:50%; transform: translate(-50%,-50%); color: #f55; z-index: 11; background: rgba(0,0,0,0.9); padding: 20px; border-radius: 5px; text-align: center; display: none;}
     .overlay-info { position: absolute; bottom: 5px; left: 5px; font-size: 12px; color: #ff0; pointer-events: none; text-shadow: 1px 1px 0 #000; z-index: 5;}
+    
+    /* --- Specs Button & Modal --- */
+    .btn-specs { background: #444; color: #fff; border: 1px solid #666; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.9em; transition: 0.2s; }
+    .btn-specs:hover { background: #666; }
+    
+    dialog {
+        background: #222; color: #eee; border: 1px solid #555; border-radius: 8px;
+        padding: 20px; max-width: 600px; width: 90%; box-shadow: 0 0 20px rgba(0,0,0,0.8);
+    }
+    dialog::backdrop { background: rgba(0,0,0,0.7); }
+    dialog h2 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
+    .spec-list { font-size: 0.9em; line-height: 1.5; max-height: 60vh; overflow-y: auto; }
+    .spec-item { margin-bottom: 12px; }
+    .spec-title { color: #4db6ac; font-weight: bold; display: block; margin-bottom: 2px; }
+    .spec-desc { color: #ccc; margin-left: 10px; }
+    .close-btn { display: block; margin: 20px auto 0; background: #d32f2f; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; }
 </style>
 </head>
 <body>
 
 <header>
-    <h1>RT-Viewer データ圧縮比較 (Final v3)</h1>
-    <small style="color:#aaa">左:WL/WW | 右:Zoom | 中:Pan | ホイール:Slice</small>
+    <h1>RT-Viewer Comp. <button class="btn-specs" onclick="document.getElementById('specModal').showModal()">ℹ️ Specs</button></h1>
+    <small style="color:#aaa; display:none; @media(min-width:600px){display:block;}">左:WL/WW | 右:Zoom | 中:Pan | ホイール:Slice</small>
 </header>
 
 <div class="container">
@@ -48,17 +71,25 @@
     <input type="range" id="sliceRange" min="0" max="100" value="0">
 </div>
 
+<dialog id="specModal">
+    <h2>データセット仕様</h2>
+    <div class="spec-list">
+        <div class="spec-item"><span class="spec-title">1. Original (16-bit/512px)</span><span class="spec-desc">DICOM生データを保持。16-bit/512px。画質劣化なし。</span></div>
+        <div class="spec-item"><span class="spec-title">2. Reference (16-bit/256px)</span><span class="spec-desc">1番の解像度を256pxに縮小</span></div>
+        <div class="spec-item"><span class="spec-title">3. Linear 5-bit (Full 12-bit Range)</span><span class="spec-desc">CT値の全範囲（-1000〜3096HU 12bit）を均等に32分割。5bit化</span></div>
+        <div class="spec-item"><span class="spec-title">4. Non-Linear 5-bit (Old Logic)</span><span class="spec-desc">軟部組織（-150〜350HU）に集中させて非線形量子化(5bit)</span></div>
+        <div class="spec-item"><span class="spec-title">5. Body Masked</span><span class="spec-desc">4番に加え、体輪郭の外側を-1000HUで塗りつぶし</span></div>
+        <div class="spec-item"><span class="spec-title">6. Full Optimization (Mosaic)</span><span class="spec-desc">5番に加え、周辺部の解像度を1/4に落とすモザイク処理</span></div>
+        <div class="spec-item"><span class="spec-title">7. Silhouette (HU=0/-1000)</span><span class="spec-desc">体内を0HU、体外を-1000HUに置換</span></div>
+        <div class="spec-item"><span class="spec-title">8. Custom 5-bit (Your 4-Step Logic)</span><span class="spec-desc">6番と非線形量子化ロジックを調整。HU:0〜100領域を細分化。</span></div>
+    </div>
+    <button class="close-btn" onclick="document.getElementById('specModal').close()">閉じる</button>
+</dialog>
+
 <script>
 // --- LUT定義 ---
-// 1. 旧ロジック
 const LUT_5BIT_OLD = generateLUT(32, [0, 2, 13, 31], [-1000, -150, 350, 1000]);
-
-// 2. ★新ロジック (Custom 5-bit 4-Step)
-// Range: -1000 -> -200 -> 0 -> 100 -> 1000
-// Points: 0 -> 2 -> 7 -> 17 -> 31
 const LUT_5BIT_CUSTOM = generateLUT(32, [0, 2, 7, 17, 31], [-1000, -200, 0, 100, 1000]);
-
-// 3. 8-bit用 (Silhouette等)
 const LUT_8BIT = generateLUT(256, [0, 10, 245, 255], [-1000, -150, 350, 1000]);
 
 let manifest = null;
@@ -98,53 +129,33 @@ function setupUI() {
     window.addEventListener('resize', requestRender);
 }
 
-// --- 操作系 (標準DICOMビューア仕様) ---
+// --- Mouse Events ---
 function onMouseDown(e) {
     if(e.target.tagName!=='CANVAS')return;
     viewState.lastX=e.clientX; viewState.lastY=e.clientY;
-    if(e.button===0) viewState.isLeft=true;       // Left: WL/WW
-    else if(e.button===1) viewState.isMiddle=true; // Middle: Pan
-    else if(e.button===2) viewState.isRight=true;  // Right: Zoom
+    if(e.button===0) viewState.isLeft=true;
+    else if(e.button===1) viewState.isMiddle=true;
+    else if(e.button===2) viewState.isRight=true;
     e.preventDefault();
 }
 function onMouseUp(e) { viewState.isLeft=false; viewState.isRight=false; viewState.isMiddle=false; }
 function onMouseMove(e) {
     if(!viewState.isLeft && !viewState.isRight && !viewState.isMiddle) return;
     const dx=e.clientX-viewState.lastX, dy=e.clientY-viewState.lastY;
-    
-    if(viewState.isLeft) {
-        // WL/WW
-        viewState.ww = Math.max(1, viewState.ww + dx * 2);
-        viewState.wl -= dy * 2;
-    } else if(viewState.isRight) {
-        // Zoom (Right Drag) - 上下でズームインアウト
-        const zoomSpeed = 0.01;
-        const factor = 1 + (-dy * zoomSpeed);
-        viewState.scale = Math.max(0.1, viewState.scale * factor);
-    } else if(viewState.isMiddle) {
-        // Pan (Middle Drag)
-        viewState.panX += dx / viewState.scale;
-        viewState.panY += dy / viewState.scale;
-    }
+    if(viewState.isLeft) { viewState.ww = Math.max(1, viewState.ww + dx * 2); viewState.wl -= dy * 2; } 
+    else if(viewState.isRight) { const factor = 1 + (-dy * 0.01); viewState.scale = Math.max(0.1, viewState.scale * factor); } 
+    else if(viewState.isMiddle) { viewState.panX += dx / viewState.scale; viewState.panY += dy / viewState.scale; }
     viewState.lastX=e.clientX; viewState.lastY=e.clientY;
     requestRender();
 }
 function onWheel(e) {
     e.preventDefault();
     const maxSlice = document.getElementById('sliceRange').max;
-    // ホイールでスライス移動
-    if(e.deltaY > 0) {
-        viewState.slice = Math.min(maxSlice, viewState.slice + 1);
-    } else {
-        viewState.slice = Math.max(0, viewState.slice - 1);
-    }
+    if(e.deltaY > 0) viewState.slice = Math.min(maxSlice, viewState.slice + 1);
+    else viewState.slice = Math.max(0, viewState.slice - 1);
     updateView();
 }
-function updateView() {
-    document.getElementById('sliceDisp').innerText = viewState.slice;
-    document.getElementById('sliceRange').value = viewState.slice;
-    requestRender();
-}
+function updateView() { document.getElementById('sliceDisp').innerText = viewState.slice; document.getElementById('sliceRange').value = viewState.slice; requestRender(); }
 
 async function loadVariant(side, idx) {
     const v = manifest.variants[idx];
@@ -154,7 +165,7 @@ async function loadVariant(side, idx) {
 
     if(v.size_gz) {
         const mb = (v.size_gz/1048576).toFixed(3);
-        const baseSize = manifest.variants[0].size_gz; // 1番(Original)基準
+        const baseSize = manifest.variants[0].size_gz; 
         const ratio = (v.size_gz / baseSize * 100).toFixed(1);
         sizeBadge.innerText = `${mb}MB (${ratio}%)`;
     }
@@ -202,7 +213,6 @@ function drawPanel(side) {
 
     for (let i=0; i < H*W; i++) {
         let hu = 0; const raw = src[offset + i];
-        
         if (vMeta.type === 'int16') hu = raw;
         else if (vMeta.type === 'uint8') hu = raw / 255.0 * 500.0 - 150.0;
         else if (vMeta.type === 'linear_5bit') hu = (raw / 31.0) * 2000.0 - 1000.0;
