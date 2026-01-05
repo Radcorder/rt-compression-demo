@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>RT-Viewer Ultimate Comparison (Final v5)</title>
+<title>RT-Viewer Ultimate Comparison (Final v6: Zoom Button Sync)</title>
 <style>
     /* --- Base Styles --- */
     body { background: #111; color: #eee; font-family: sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;}
@@ -20,30 +20,32 @@
     canvas { position: absolute; image-rendering: pixelated; }
     
     /* --- Footer Controls --- */
-    .slice-ctrl { padding: 10px; background: #222; display: flex; gap: 10px; align-items: center; justify-content: center; }
-    input[type=range] { width: 300px; }
+    .footer-ctrl { padding: 10px; background: #222; display: flex; gap: 20px; align-items: center; justify-content: center; border-top: 1px solid #444;}
+    .slice-group, .zoom-group { display: flex; align-items: center; gap: 10px; }
+    input[type=range] { width: 250px; }
+    
+    /* ボタンのスタイル */
+    .btn-tool {
+        background: #444; color: #fff; border: 1px solid #666; padding: 5px 12px;
+        cursor: pointer; border-radius: 4px; font-size: 14px; font-weight: bold;
+    }
+    .btn-tool:hover { background: #555; }
+    .btn-tool:active { background: #333; }
     
     /* --- Overlays & UI --- */
     .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; background: #444; min-width: 60px; text-align: right;}
     .loading { position: absolute; top:50%; left:50%; transform: translate(-50%,-50%); color: #0ff; z-index: 10; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; pointer-events: none; display: none;}
     .error-msg { position: absolute; top:50%; left:50%; transform: translate(-50%,-50%); color: #f55; z-index: 11; background: rgba(0,0,0,0.9); padding: 20px; border-radius: 5px; text-align: center; display: none;}
     
-    /* 右下の情報 (Zoomなど) */
     .overlay-info { position: absolute; bottom: 5px; right: 5px; font-size: 12px; color: #ff0; pointer-events: none; text-shadow: 1px 1px 0 #000; z-index: 5; text-align: right;}
     
-    /* ★追加: 左上の説明文オーバーレイ */
     .overlay-desc {
         position: absolute; top: 10px; left: 10px;
-        color: #fff; 
-        font-size: 14px; line-height: 1.4;
-        background: rgba(0, 0, 0, 0.6); /* 半透明の黒背景 */
-        padding: 8px 12px;
-        border-radius: 4px;
-        pointer-events: none; /* マウス操作を邪魔しない */
-        z-index: 6;
-        max-width: 80%;
-        text-shadow: 1px 1px 1px #000;
-        border-left: 3px solid #0ff; /* アクセント */
+        color: #fff; font-size: 14px; line-height: 1.4;
+        background: rgba(0, 0, 0, 0.6); padding: 8px 12px;
+        border-radius: 4px; pointer-events: none; z-index: 6;
+        max-width: 80%; text-shadow: 1px 1px 1px #000;
+        border-left: 3px solid #0ff;
     }
 </style>
 </head>
@@ -51,7 +53,7 @@
 
 <header>
     <h1>RT-Viewer Comp.</h1>
-    <small style="color:#aaa; display:none; @media(min-width:600px){display:block;}">左:WL/WW | 右:Zoom | 中:Pan | ホイール:Slice</small>
+    <small style="color:#aaa;">左ドラッグ:WL/WW | 中ドラッグ:Pan | ホイール:Slice</small>
 </header>
 
 <div class="container">
@@ -61,9 +63,7 @@
             <canvas id="cvsL"></canvas>
             <div id="msgL" class="loading">Loading...</div>
             <div id="errL" class="error-msg"></div>
-            
             <div id="descL" class="overlay-desc"></div>
-            
             <div class="overlay-info" id="infoL"></div>
         </div>
     </div>
@@ -73,21 +73,28 @@
             <canvas id="cvsR"></canvas>
             <div id="msgR" class="loading">Loading...</div>
             <div id="errR" class="error-msg"></div>
-            
             <div id="descR" class="overlay-desc"></div>
-            
             <div class="overlay-info" id="infoR"></div>
         </div>
     </div>
 </div>
 
-<div class="slice-ctrl">
-    <span>Slice: <span id="sliceDisp">0</span></span>
-    <input type="range" id="sliceRange" min="0" max="100" value="0">
+<div class="footer-ctrl">
+    <div class="slice-group">
+        <span>Slice: <span id="sliceDisp">0</span></span>
+        <input type="range" id="sliceRange" min="0" max="100" value="0">
+    </div>
+    
+    <div class="zoom-group">
+        <span style="font-size: 12px; color: #aaa;">Zoom:</span>
+        <button class="btn-tool" onclick="changeZoom(0.2)">+</button>
+        <button class="btn-tool" onclick="changeZoom(-0.2)">-</button>
+        <button class="btn-tool" onclick="resetZoom()" style="font-size: 12px;">Reset</button>
+    </div>
 </div>
 
 <script>
-// --- 説明文データ (JS側で管理) ---
+// --- 説明文データ ---
 const DESCRIPTIONS = [
     "DICOM生データを保持。16-bit/512px。画質劣化なし。",
     "1番の解像度を256pxに縮小",
@@ -106,6 +113,7 @@ const LUT_8BIT = generateLUT(256, [0, 10, 245, 255], [-1000, -150, 350, 1000]);
 
 let manifest = null;
 let volumes = {};
+// 共有の viewState により左右を同期
 let viewState = { slice: 0, scale: 1.0, panX: 0, panY: 0, ww: 400, wl: 40, isLeft: false, isRight: false, isMiddle: false, lastX: 0, lastY: 0 };
 const offCanvas = document.createElement('canvas');
 const offCtx = offCanvas.getContext('2d');
@@ -126,40 +134,76 @@ function setupUI() {
         const sel = document.getElementById(`sel${side}`);
         manifest.variants.forEach((v, idx) => sel.add(new Option(v.name, idx)));
         sel.onchange = (e) => loadVariant(side, e.target.value);
+        
         const cont = document.getElementById(`cont${side}`);
         cont.addEventListener('mousedown', onMouseDown);
-        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);     
         cont.addEventListener('wheel', onWheel, {passive: false});
         cont.addEventListener('contextmenu', e => e.preventDefault());
     });
+    
+    window.addEventListener('mousemove', onMouseMove); 
+    window.addEventListener('mouseup', onMouseUp);     
+
     const range = document.getElementById('sliceRange');
     const baseDims = manifest.base_dims || manifest.variants[0].dims;
     range.max = baseDims[0] - 1;
     range.value = Math.floor(baseDims[0] / 2);
     viewState.slice = parseInt(range.value);
-    range.oninput = (e) => { viewState.slice = parseInt(e.target.value); updateView(); };
+    
+    range.oninput = (e) => { 
+        viewState.slice = parseInt(e.target.value); 
+        updateView(); 
+    };
     window.addEventListener('resize', requestRender);
 }
 
+// --- ★新規追加: ズームボタン用関数 ---
+window.changeZoom = (delta) => {
+    viewState.scale = Math.max(0.1, viewState.scale + delta);
+    requestRender();
+};
+
+window.resetZoom = () => {
+    viewState.scale = 1.0;
+    viewState.panX = 0;
+    viewState.panY = 0;
+    requestRender();
+};
+
 // --- Mouse Events ---
 function onMouseDown(e) {
-    if(e.target.tagName!=='CANVAS')return;
-    viewState.lastX=e.clientX; viewState.lastY=e.clientY;
-    if(e.button===0) viewState.isLeft=true;
-    else if(e.button===1) viewState.isMiddle=true;
-    else if(e.button===2) viewState.isRight=true;
+    if(e.target.tagName !== 'CANVAS') return;
+    viewState.lastX = e.clientX; 
+    viewState.lastY = e.clientY;
+    if(e.button === 0) viewState.isLeft = true;
+    else if(e.button === 1) viewState.isMiddle = true;
     e.preventDefault();
 }
-function onMouseUp(e) { viewState.isLeft=false; viewState.isRight=false; viewState.isMiddle=false; }
+
+function onMouseUp(e) { 
+    viewState.isLeft = false; 
+    viewState.isMiddle = false; 
+}
+
 function onMouseMove(e) {
-    if(!viewState.isLeft && !viewState.isRight && !viewState.isMiddle) return;
-    const dx=e.clientX-viewState.lastX, dy=e.clientY-viewState.lastY;
-    if(viewState.isLeft) { viewState.ww = Math.max(1, viewState.ww + dx * 2); viewState.wl -= dy * 2; } 
-    else if(viewState.isRight) { const factor = 1 + (-dy * 0.01); viewState.scale = Math.max(0.1, viewState.scale * factor); } 
-    else if(viewState.isMiddle) { viewState.panX += dx / viewState.scale; viewState.panY += dy / viewState.scale; }
-    viewState.lastX=e.clientX; viewState.lastY=e.clientY;
+    if(!viewState.isLeft && !viewState.isMiddle) return;
+    const dx = e.clientX - viewState.lastX; 
+    const dy = e.clientY - viewState.lastY;
+    
+    if(viewState.isLeft) { 
+        viewState.ww = Math.max(1, viewState.ww + dx * 2); 
+        viewState.wl -= dy * 2; 
+    } 
+    else if(viewState.isMiddle) { 
+        viewState.panX += dx / viewState.scale; 
+        viewState.panY += dy / viewState.scale; 
+    }
+    
+    viewState.lastX = e.clientX; 
+    viewState.lastY = e.clientY;
     requestRender();
 }
+
 function onWheel(e) {
     e.preventDefault();
     const maxSlice = document.getElementById('sliceRange').max;
@@ -167,22 +211,20 @@ function onWheel(e) {
     else viewState.slice = Math.max(0, viewState.slice - 1);
     updateView();
 }
-function updateView() { document.getElementById('sliceDisp').innerText = viewState.slice; document.getElementById('sliceRange').value = viewState.slice; requestRender(); }
+
+function updateView() { 
+    document.getElementById('sliceDisp').innerText = viewState.slice; 
+    document.getElementById('sliceRange').value = viewState.slice; 
+    requestRender(); 
+}
 
 async function loadVariant(side, idx) {
     const v = manifest.variants[idx];
-    const sel = document.getElementById(`sel${side}`);
     const sizeBadge = document.getElementById(`size${side}`);
-    const descBox = document.getElementById(`desc${side}`); // 説明文ボックス
+    const descBox = document.getElementById(`desc${side}`);
     
-    sel.value = idx;
-
-    // ★説明文の更新 (idxに対応するテキストを表示)
-    if(DESCRIPTIONS[idx]) {
-        descBox.innerText = DESCRIPTIONS[idx];
-    } else {
-        descBox.innerText = "";
-    }
+    document.getElementById(`sel${side}`).value = idx;
+    if(DESCRIPTIONS[idx]) descBox.innerText = DESCRIPTIONS[idx];
 
     if(v.size_gz) {
         const mb = (v.size_gz/1048576).toFixed(3);
@@ -195,21 +237,32 @@ async function loadVariant(side, idx) {
         try {
             document.getElementById(`msg${side}`).style.display = 'block';
             const res = await fetch(v.file, {cache: "no-store"});
-            if (!res.ok) throw new Error("File not found");
             const ds = new DecompressionStream("gzip");
             const reader = res.body.pipeThrough(ds).getReader();
             let loaded=0, chunks=[];
-            while(true) { const {done, value}=await reader.read(); if(done)break; chunks.push(value); loaded+=value.length; }
+            while(true) { 
+                const {done, value} = await reader.read(); 
+                if(done) break; 
+                chunks.push(value); loaded += value.length; 
+            }
             const combined = new Uint8Array(loaded);
-            let offset=0; for(let c of chunks){ combined.set(c, offset); offset+=c.length; }
-            volumes[v.id] = { data: (v.type==='int16')?new Int16Array(combined.buffer):combined, meta: v };
-        } catch (e) { document.getElementById(`err${side}`).innerText="Error"; document.getElementById(`err${side}`).style.display='block'; return; }
+            let offset=0; for(let c of chunks){ combined.set(c, offset); offset += c.length; }
+            volumes[v.id] = { data: (v.type === 'int16') ? new Int16Array(combined.buffer) : combined, meta: v };
+        } catch (e) { 
+            document.getElementById(`err${side}`).innerText = "Error"; 
+            document.getElementById(`err${side}`).style.display = 'block'; 
+            return; 
+        }
         document.getElementById(`msg${side}`).style.display = 'none';
     }
     requestRender();
 }
 
-function requestRender() { drawPanel('L'); drawPanel('R'); updateInfo(); }
+function requestRender() { 
+    drawPanel('L'); 
+    drawPanel('R'); 
+    updateInfo(); 
+}
 
 function drawPanel(side) {
     const idx = document.getElementById(`sel${side}`).value;
@@ -227,8 +280,7 @@ function drawPanel(side) {
     const imgData = offCtx.createImageData(W, H);
     const buf = imgData.data;
     const src = vol.data;
-    const safeSlice = Math.min(viewState.slice, D-1);
-    const offset = safeSlice * H * W;
+    const offset = Math.min(viewState.slice, D-1) * H * W;
     const wMin = viewState.wl - viewState.ww / 2;
     const wDiv = 255 / viewState.ww;
 
@@ -263,7 +315,8 @@ function drawPanel(side) {
 
 function updateInfo() {
     const txt = `WL: ${viewState.wl.toFixed(0)} / WW: ${viewState.ww.toFixed(0)} | Zoom: x${viewState.scale.toFixed(2)} | Slice: ${viewState.slice}`;
-    document.getElementById('infoL').innerText = txt; document.getElementById('infoR').innerText = txt;
+    document.getElementById('infoL').innerText = txt; 
+    document.getElementById('infoR').innerText = txt;
 }
 
 function generateLUT(steps, P, R) {
